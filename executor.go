@@ -7,6 +7,7 @@ import (
 	"os"
 
 	krakendbf "github.com/devopsfaith/bloomfilter/krakend"
+	extRouter "github.com/devopsfaith/krakend-ce/ext/router/gin"
 	cel "github.com/devopsfaith/krakend-cel"
 	"github.com/devopsfaith/krakend-cobra"
 	cors "github.com/devopsfaith/krakend-cors/gin"
@@ -36,8 +37,9 @@ import (
 	"github.com/letgoapp/krakend-influx"
 )
 
-// NewExecutor returns an executor for the cmd package. The executor initalizes the entire gateway by
-// registering the components and composing a RouterFactory wrapping all the middlewares.
+// NewExecutor returns an executor for the cmd package. We are replacing the
+// method NewCmdExecutor so that we can register the Gin router without
+// enforcing the only one backend for non-GET endpoint.
 func NewExecutor(ctx context.Context) cmd.Executor {
 	eb := new(ExecutorBuilder)
 	return eb.NewCmdExecutor(ctx)
@@ -108,10 +110,9 @@ type ExecutorBuilder struct {
 	Middlewares []gin.HandlerFunc
 }
 
-// NewCmdExecutor returns an executor for the cmd package. The executor initalizes the entire gateway by
-// delegating most of the tasks to the injected collaborators. They register the components and
-// compose a RouterFactory wrapping all the middlewares.
-// Every nil collaborator is replaced by the default one offered by this package.
+// NewCmdExecutor returns an executor for the cmd package. We replace the
+// default one so that we can register the Gin router without enforcing the
+// only one backend for non-GET endpoint.
 func (e *ExecutorBuilder) NewCmdExecutor(ctx context.Context) cmd.Executor {
 	e.checkCollaborators()
 
@@ -142,7 +143,7 @@ func (e *ExecutorBuilder) NewCmdExecutor(ctx context.Context) cmd.Executor {
 		}
 
 		// setup the krakend router
-		routerFactory := router.NewFactory(router.Config{
+		routerFactory := extRouter.NewFactory(router.Config{
 			Engine: e.EngineFactory.NewEngine(cfg, logger, gelfWriter),
 			ProxyFactory: e.ProxyFactory.NewProxyFactory(
 				logger,

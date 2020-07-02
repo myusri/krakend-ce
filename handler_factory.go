@@ -2,6 +2,7 @@ package krakend
 
 import (
 	botdetector "github.com/devopsfaith/krakend-botdetector/gin"
+	extRouter "github.com/devopsfaith/krakend-ce/ext/router/gin"
 	"github.com/devopsfaith/krakend-jose"
 	ginjose "github.com/devopsfaith/krakend-jose/gin"
 	lua "github.com/devopsfaith/krakend-lua/router/gin"
@@ -12,9 +13,12 @@ import (
 	router "github.com/devopsfaith/krakend/router/gin"
 )
 
-// NewHandlerFactory returns a HandlerFactory with a rate-limit and a metrics collector middleware injected
+// NewHandlerFactory make use of our own base endpoint handler
+// extRouter.EndpointHandler which would return the status code from the
+// backends to the endpoint caller.
 func NewHandlerFactory(logger logging.Logger, metricCollector *metrics.Metrics, rejecter jose.RejecterFactory) router.HandlerFactory {
-	handlerFactory := juju.HandlerFactory
+	handlerFactory := extRouter.EndpointHandler
+	handlerFactory = juju.NewRateLimiterMw(handlerFactory)
 	handlerFactory = lua.HandlerFactory(logger, handlerFactory)
 	handlerFactory = ginjose.HandlerFactory(handlerFactory, logger, rejecter)
 	handlerFactory = metricCollector.NewHTTPHandlerFactory(handlerFactory)

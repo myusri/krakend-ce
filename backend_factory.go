@@ -4,6 +4,7 @@ import (
 	"context"
 
 	amqp "github.com/devopsfaith/krakend-amqp"
+	extProxy "github.com/devopsfaith/krakend-ce/ext/proxy"
 	cel "github.com/devopsfaith/krakend-cel"
 	cb "github.com/devopsfaith/krakend-circuitbreaker/gobreaker/proxy"
 	httpcache "github.com/devopsfaith/krakend-httpcache"
@@ -50,7 +51,30 @@ func NewBackendFactoryWithContext(ctx context.Context, logger logging.Logger, me
 		return opencensus.HTTPRequestExecutor(clientFactory)
 	}
 	requestExecutorFactory = httprequestexecutor.HTTPRequestExecutor(logger, requestExecutorFactory)
-	backendFactory := martian.NewConfiguredBackendFactory(logger, requestExecutorFactory)
+
+	// We need to use our own HTTPResponseParser and HTTPStatusHandler because
+	// by default an error will be reported if the status code is not 200 or
+	// 201. We will still call martian.NewConfiguredBackendFactory for the
+	// side-effect (parse.Register)
+	martian.NewConfiguredBackendFactory(logger, requestExecutorFactory)
+	backendFactory := func(remote *config.Backend) proxy.Proxy {
+		re := requestExecutorFactory(remote)
+		result, ok := martian.ConfigGetter(remote.ExtraConfig).(martian.Result)
+		if !ok {
+			return extProxy.NewHTTPProxyWithHTTPExecutor(remote, re, remote.Decoder)
+		}
+		switch result.Err {
+		case nil:
+			return extProxy.NewHTTPProxyWithHTTPExecutor(
+				remote, martian.HTTPRequestExecutor(result.Result, re), remote.Decoder)
+		case martian.ErrEmptyValue:
+			return extProxy.NewHTTPProxyWithHTTPExecutor(remote, re, remote.Decoder)
+		default:
+			logger.Error(result, remote.ExtraConfig)
+			return extProxy.NewHTTPProxyWithHTTPExecutor(remote, re, remote.Decoder)
+		}
+	}
+
 	bf := pubsub.NewBackendFactory(ctx, logger, backendFactory)
 	backendFactory = bf.New
 	backendFactory = amqp.NewBackendFactory(ctx, logger, backendFactory)
