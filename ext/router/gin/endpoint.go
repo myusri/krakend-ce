@@ -16,6 +16,8 @@ import (
 
 // EndpointHandler is called by the NewHandlerFactory which is used to prepare
 // the base endpoint handler in a stack of handler functions for an endpoint.
+// It is the endpoint handler before we pass the request to the backend(s) for
+// the endpoint.
 func EndpointHandler(configuration *config.EndpointConfig, proxy proxy.Proxy) gin.HandlerFunc {
 	return CustomErrorEndpointHandler(configuration, proxy, server.DefaultToHTTPError)
 }
@@ -70,14 +72,17 @@ func CustomErrorEndpointHandler(
 		if err != nil {
 			c.Error(err)
 
-			if response == nil {
-				if t, ok := err.(ResponseError); ok {
-					c.Status(t.StatusCode())
-				} else {
-					c.Status(errF(err))
-				}
-				cancel()
-				return
+			// Unexpected system error. For our case, we do not want to
+			// return success response in case of any error whatsoever.
+			// Generate a response with status code 500 (Internal Server
+			// Error).
+			response = &proxy.Response{
+				Data: map[string]interface{}{
+					"error": err.Error(),
+				},
+				Metadata: proxy.Metadata{
+					StatusCode: errF(err),
+				},
 			}
 		}
 		// If the response collected from the backend(s) signals a non-success
@@ -89,11 +94,6 @@ func CustomErrorEndpointHandler(
 		render(c, response)
 		cancel()
 	}
-}
-
-type ResponseError interface {
-	error
-	StatusCode() int
 }
 
 // TODO: Sorry. Gin render stuff is too tight to access. We will do JSON render
