@@ -2,6 +2,8 @@ module github.com/devopsfaith/krakend-ce
 
 go 1.12
 
+replace github.com/devopsfaith/krakend-gologging => github.com/myusri/krakend-gologging v0.0.0-20200706051136-e01738a8be6f
+
 require (
 	contrib.go.opencensus.io/exporter/jaeger v0.0.0-20190424224017-5b8293c22f36 // indirect
 	contrib.go.opencensus.io/exporter/prometheus v0.0.0-20190424224027-f02a6e68f94d // indirect
