@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 
 	krakendbf "github.com/devopsfaith/bloomfilter/krakend"
@@ -52,7 +53,7 @@ type PluginLoader interface {
 
 // SubscriberFactoriesRegister registers all the required subscriber factories from the available service
 // discover components and adapters and returns a service register function.
-// The service reguster function will register the service by the given name and port to all the available
+// The service register function will register the service by the given name and port to all the available
 // service discover clients
 type SubscriberFactoriesRegister interface {
 	Register(context.Context, config.ServiceConfig, logging.Logger) func(string, int)
@@ -95,6 +96,14 @@ type LoggerFactory interface {
 	NewLogger(config.ServiceConfig) (logging.Logger, io.Writer, error)
 }
 
+// RunServer defines the interface of a function used by the KrakenD router to start the service
+type RunServer func(context.Context, config.ServiceConfig, http.Handler) error
+
+// RunServerFactory returns a RunServer with several wraps around the injected one
+type RunServerFactory interface {
+	NewRunServer(logging.Logger, router.RunServerFunc) RunServer
+}
+
 // ExecutorBuilder is a composable builder. Every injected property is used by the NewCmdExecutor method.
 type ExecutorBuilder struct {
 	LoggerFactory               LoggerFactory
@@ -106,6 +115,7 @@ type ExecutorBuilder struct {
 	ProxyFactory                ProxyFactory
 	BackendFactory              BackendFactory
 	HandlerFactory              HandlerFactory
+	RunServerFactory            RunServerFactory
 
 	Middlewares []gin.HandlerFunc
 }
@@ -153,10 +163,7 @@ func (e *ExecutorBuilder) NewCmdExecutor(ctx context.Context) cmd.Executor {
 			Middlewares:    e.Middlewares,
 			Logger:         logger,
 			HandlerFactory: e.HandlerFactory.NewHandlerFactory(logger, metricCollector, tokenRejecterFactory),
-			RunServer: router.RunServerFunc(server.New(
-				logger,
-				server.RunServer(cors.NewRunServer(krakendrouter.RunServer)),
-			)),
+			RunServer:      router.RunServerFunc(e.RunServerFactory.NewRunServer(logger, krakendrouter.RunServer)),
 		})
 
 		// start the engines
@@ -192,6 +199,20 @@ func (e *ExecutorBuilder) checkCollaborators() {
 	if e.LoggerFactory == nil {
 		e.LoggerFactory = new(LoggerBuilder)
 	}
+	if e.RunServerFactory == nil {
+		e.RunServerFactory = new(DefaultRunServerFactory)
+	}
+}
+
+// DefaultRunServerFactory creates the default RunServer by wrapping the injected RunServer
+// with the plugin loader and the CORS module
+type DefaultRunServerFactory struct{}
+
+func (d *DefaultRunServerFactory) NewRunServer(l logging.Logger, next router.RunServerFunc) RunServer {
+	return RunServer(server.New(
+		l,
+		server.RunServer(cors.NewRunServer(cors.RunServer(next))),
+	))
 }
 
 // LoggerBuilder is the default BuilderFactory implementation.
